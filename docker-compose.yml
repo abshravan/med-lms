@@ -1,0 +1,118 @@
+# Local development topology.
+#
+# In production Postgres and Redis become managed services and `api` / `web` run
+# as replicated containers behind a load balancer; the service definitions and
+# environment contract stay identical, which is the point of defining them here.
+
+name: med-lms
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-medlms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-med_lms}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Runs only on first initialisation of an empty data volume.
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-medlms} -d ${POSTGRES_DB:-med_lms}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Persistence is on so the JWKS cache and revocation deny-list survive a
+    # restart. Losing the deny-list would silently un-revoke sessions.
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory ${REDIS_MAXMEMORY:-256mb}
+      --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      target: ${BUILD_TARGET:-development}
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-true}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-medlms}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-med_lms}
+      REDIS_URL: redis://redis:6379/0
+      # Resolved over the compose network — the API fetches the public key set
+      # from the identity service, never a shared secret.
+      AUTH_JWKS_URL: http://web:3000/api/auth/jwks
+      AUTH_ISSUER: ${BETTER_AUTH_URL:-http://localhost:3000}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-med-lms-api}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    volumes:
+      # Bind mount for hot reload in development. The production target ignores
+      # this because it runs without --reload.
+      - ./backend:/app
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as r; r.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: ./web
+      target: ${BUILD_TARGET:-development}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-medlms}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-med_lms}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-med-lms-api}
+      # Server-side calls use the compose network; the browser uses the public URL.
+      API_INTERNAL_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_APP_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      EMAIL_FROM: ${EMAIL_FROM:-no-reply@medlms.local}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+    volumes:
+      - ./web:/app
+      # Anonymous volumes keep container-built artefacts from being shadowed by
+      # the host bind mount above.
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  redis_data:
