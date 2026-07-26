@@ -97,21 +97,50 @@ def _run_alembic(*args: str) -> None:
         raise RuntimeError(f"alembic {' '.join(args)} failed:\n{result.stdout}\n{result.stderr}")
 
 
-async def _reset_database() -> None:
-    """Drop everything, then recreate the identity tables Better Auth owns.
+AUTH_SCHEMA_SQL = (
+    BACKEND_ROOT.parent / "infra" / "postgres" / "reference" / "auth-schema.sql"
+)
 
-    In production those tables come from the `better-auth` CLI. Here they are
-    created from the read-only ORM mapping, which doubles as a check that the
-    mapping stays loadable.
+
+async def _reset_database() -> None:
+    """Drop everything, then recreate the identity schema Better Auth owns.
+
+    The identity DDL is applied from `infra/postgres/reference/auth-schema.sql`,
+    which is a `pg_dump` of what the `better-auth` CLI actually produces — not a
+    hand-written approximation. That matters: the ORM mapping in
+    `app/models/auth.py` declares `String(255)` where Better Auth uses `text`, and
+    nullable where it is `NOT NULL`. Testing against the real DDL is what proves
+    the read-only mapping is genuinely compatible with the production schema
+    instead of merely compatible with itself.
     """
     engine = create_async_engine(ASYNC_DSN, poolclass=NullPool)
     async with engine.begin() as connection:
         await connection.execute(text("DROP SCHEMA IF EXISTS auth CASCADE"))
         await connection.execute(text("DROP SCHEMA public CASCADE"))
         await connection.execute(text("CREATE SCHEMA public"))
+        await connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await connection.execute(text("CREATE SCHEMA auth"))
-        await connection.run_sync(AuthUser.__table__.create)
+        for statement in _split_sql_statements(AUTH_SCHEMA_SQL.read_text()):
+            await connection.execute(text(statement))
     await engine.dispose()
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split a plain SQL script into individual statements.
+
+    Necessary because asyncpg refuses multiple commands in one prepared statement.
+    The reference dump contains only plain DDL — no functions, triggers, or
+    dollar-quoted bodies — so splitting on `;` is sufficient here. If the dump ever
+    grows a `$$`-quoted block this will need a real parser.
+    """
+    without_comments = "\n".join(
+        line for line in sql.splitlines() if not line.lstrip().startswith("--")
+    )
+    return [
+        statement.strip()
+        for statement in without_comments.split(";")
+        if statement.strip()
+    ]
 
 
 @pytest.fixture(scope="session", autouse=True)
