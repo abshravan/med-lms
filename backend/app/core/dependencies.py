@@ -26,8 +26,10 @@ from app.core.redis import is_revoked
 from app.core.security import TokenClaims, verify_access_token
 from app.middleware.request_context import get_request_id
 from app.models.profile import UserRole
+from app.repositories.course_repository import CourseRepository
 from app.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthenticatedUser, AuthService, RequestContext
+from app.services.course_service import CourseService
 
 # auto_error=False so a missing header raises our own enveloped 401 rather than
 # FastAPI's bare `{"detail": ...}`, which would break the response contract.
@@ -61,6 +63,21 @@ def get_auth_service(
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
+
+
+def get_course_repository(session: SessionDep) -> CourseRepository:
+    """Provide a request-scoped course repository."""
+    return CourseRepository(session)
+
+
+def get_course_service(
+    repository: Annotated[CourseRepository, Depends(get_course_repository)],
+) -> CourseService:
+    """Provide a request-scoped course service."""
+    return CourseService(repository)
+
+
+CourseServiceDep = Annotated[CourseService, Depends(get_course_service)]
 
 
 async def get_token_claims(

@@ -65,6 +65,30 @@ class ValidationError(AppError):
     code = ErrorCode.VALIDATION_ERROR
     message = "The submitted data is invalid."
 
+    @classmethod
+    def from_pydantic(cls, exc: Exception) -> ValidationError:
+        """Convert a Pydantic ValidationError into the application's own.
+
+        FastAPI only auto-converts validation failures raised while parsing a
+        declared request model. A schema validated *manually* inside a dependency
+        — which is how query-parameter groups are validated here — raises Pydantic's
+        error directly, and without this it would escape as an unhandled exception
+        and surface as a 500 instead of a 422.
+        """
+        details: list[dict[str, str]] = []
+        errors = getattr(exc, "errors", None)
+        if callable(errors):
+            for error in errors():
+                location = error.get("loc", ())
+                parts = [str(part) for part in location] if location else []
+                details.append(
+                    {
+                        "field": ".".join(parts) if parts else "root",
+                        "message": str(error.get("msg", "Invalid value.")),
+                    }
+                )
+        return cls("The submitted data is invalid.", details=details or None)
+
 
 # ── 401 ──────────────────────────────────────────────────────────────────────
 

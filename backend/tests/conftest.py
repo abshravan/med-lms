@@ -71,6 +71,14 @@ from app.core.database import get_db_session  # noqa: E402
 from app.core.security import reset_jwks_cache  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.models.auth import AuthUser  # noqa: E402
+from app.models.course import (  # noqa: E402
+    ContentStatus,
+    Course,
+    Difficulty,
+    Lesson,
+    LessonContentType,
+    Module,
+)
 from app.models.profile import UserProfile, UserRole  # noqa: E402
 
 ASYNC_DSN = get_settings().sqlalchemy_dsn
@@ -97,9 +105,7 @@ def _run_alembic(*args: str) -> None:
         raise RuntimeError(f"alembic {' '.join(args)} failed:\n{result.stdout}\n{result.stderr}")
 
 
-AUTH_SCHEMA_SQL = (
-    BACKEND_ROOT.parent / "infra" / "postgres" / "reference" / "auth-schema.sql"
-)
+AUTH_SCHEMA_SQL = BACKEND_ROOT.parent / "infra" / "postgres" / "reference" / "auth-schema.sql"
 
 
 async def _reset_database() -> None:
@@ -136,11 +142,7 @@ def _split_sql_statements(sql: str) -> list[str]:
     without_comments = "\n".join(
         line for line in sql.splitlines() if not line.lstrip().startswith("--")
     )
-    return [
-        statement.strip()
-        for statement in without_comments.split(";")
-        if statement.strip()
-    ]
+    return [statement.strip() for statement in without_comments.split(";") if statement.strip()]
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -338,5 +340,94 @@ def make_user(session: AsyncSession):  # type: ignore[no-untyped-def]
             session.add(UserProfile(user_id=resolved_id, role=profile_role, display_name=name))
         await session.flush()
         return user
+
+    return _make
+
+
+@pytest.fixture
+def make_course(session: AsyncSession):  # type: ignore[no-untyped-def]
+    """Factory building a course with optional modules and lessons.
+
+    Builds the object graph directly rather than through the API, so catalogue
+    read tests are not coupled to the authoring endpoints working.
+    """
+
+    async def _make(
+        *,
+        title: str = "Cardiology Basics",
+        slug: str | None = None,
+        status: ContentStatus = ContentStatus.PUBLISHED,
+        specialty: str | None = "Cardiology",
+        difficulty: Difficulty = Difficulty.FOUNDATION,
+        published_at: datetime | None = None,
+        modules: int = 1,
+        lessons_per_module: int = 2,
+        lesson_status: ContentStatus | None = None,
+        lesson_duration: int | None = 600,
+        created_by: str | None = None,
+    ) -> Course:
+        resolved_slug = slug or f"course-{uuid.uuid4().hex[:10]}"
+        # The check constraint requires a timestamp whenever status is published.
+        resolved_published_at = published_at
+        if status is ContentStatus.PUBLISHED and resolved_published_at is None:
+            resolved_published_at = datetime.now(UTC)
+
+        course = Course(
+            slug=resolved_slug,
+            title=title,
+            subtitle=None,
+            description=None,
+            specialty=specialty,
+            difficulty=difficulty,
+            status=status,
+            published_at=resolved_published_at,
+            created_by=created_by,
+        )
+        session.add(course)
+        await session.flush()
+
+        effective_lesson_status = (
+            lesson_status
+            if lesson_status is not None
+            else (
+                ContentStatus.PUBLISHED
+                if status is ContentStatus.PUBLISHED
+                else ContentStatus.DRAFT
+            )
+        )
+
+        for module_index in range(modules):
+            module = Module(
+                course_id=course.id,
+                title=f"Module {module_index + 1}",
+                summary=None,
+                position=module_index,
+            )
+            session.add(module)
+            await session.flush()
+
+            for lesson_index in range(lessons_per_module):
+                session.add(
+                    Lesson(
+                        module_id=module.id,
+                        course_id=course.id,
+                        slug=f"{resolved_slug}-m{module_index}-l{lesson_index}",
+                        title=f"Lesson {lesson_index + 1}",
+                        summary=None,
+                        content_type=LessonContentType.VIDEO,
+                        duration_seconds=lesson_duration,
+                        is_free_preview=False,
+                        status=effective_lesson_status,
+                        position=lesson_index,
+                        published_at=(
+                            datetime.now(UTC)
+                            if effective_lesson_status is ContentStatus.PUBLISHED
+                            else None
+                        ),
+                    )
+                )
+
+        await session.flush()
+        return course
 
     return _make
