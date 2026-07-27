@@ -1,6 +1,6 @@
 # API Reference
 
-> Updated with every feature. Current scope: **Features 1–2 — Authentication, Courses**.
+> Updated with every feature. Current scope: **Features 1–3 — Authentication, Courses, Media**.
 
 Two API surfaces, on two origins, with different owners:
 
@@ -370,6 +370,87 @@ PUT /api/v1/admin/modules/{id}/lesson-order
 The list must contain **exactly** the current members. A partial list or a
 foreign id returns `422` — otherwise omitted items would be silently relocated,
 or content dragged in from another course.
+
+---
+
+## 4d. Media endpoints
+
+### `POST /api/v1/admin/media/uploads` — admin
+
+Request a direct-upload credential. **The API never receives the file.**
+
+```jsonc
+// request
+{ "kind": "lesson_video", "filename": "lecture.mp4",
+  "content_type": "video/mp4", "size_bytes": 524288000 }
+
+// 201
+{ "success": true, "data": {
+    "asset_id": "…", "upload_url": "https://…r2.cloudflarestorage.com/…?X-Amz-…",
+    "method": "PUT", "headers": { "Content-Type": "video/mp4" },
+    "expires_in_seconds": 900, "storage_key": "lesson_video/2026/07/….mp4" },
+  "message": "" }
+```
+
+Send the bytes to `upload_url` with the given `method` and **the headers exactly
+as returned** — they are part of the signature. Then confirm.
+
+| Kind | Accepted types | Max size |
+| --- | --- | --- |
+| `lesson_video` | `video/mp4`, `video/webm`, `video/quicktime` | 2 GB |
+| `course_cover` | `image/jpeg`, `image/png`, `image/webp` | 10 MB |
+| `lesson_attachment` | `application/pdf` | 50 MB |
+
+The object key is server-generated and its extension comes from the declared
+content type, never the filename.
+
+### `POST /api/v1/admin/media/uploads/{asset_id}/confirm` — admin
+
+Marks the asset ready. **The server HEADs the object in storage first** and reads
+back its real size — a client's claim that the upload happened is not evidence.
+Idempotent.
+
+| Outcome | Response |
+| --- | --- |
+| Object present, within limits | `200`, asset `ready` |
+| Object absent | `409 CONFLICT` — retry the *upload*, not this call |
+| Object oversized | `422` — the object is **deleted** and the asset marked `failed` |
+
+### `DELETE /api/v1/admin/media/assets/{asset_id}` — admin
+
+Deletes the object and the row → `204`. Any lesson or course referencing it has
+its reference set to null; the content itself is untouched.
+
+### Attachment — admin
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `PUT` | `/api/v1/admin/lessons/{id}/video` | Attach a ready `lesson_video` asset |
+| `DELETE` | `/api/v1/admin/lessons/{id}/video` | Detach (asset kept in storage) |
+| `PUT` | `/api/v1/admin/courses/{id}/cover` | Attach a ready `course_cover` asset |
+| `DELETE` | `/api/v1/admin/courses/{id}/cover` | Remove the cover |
+
+Body: `{ "asset_id": "…" }`. An asset that is not `ready` → `409`; a kind
+mismatch → `422`.
+
+### `GET /api/v1/courses/{slug}/lessons/{lesson_slug}/playback`
+
+A short-lived signed URL for the lesson's video. Requires a verified caller, and
+the course and lesson must both be published.
+
+```json
+{ "success": true, "data": {
+    "url": "https://…?X-Amz-Expires=300&…",
+    "expires_in_seconds": 300, "content_type": "video/mp4",
+    "duration_seconds": 900 }, "message": "" }
+```
+
+> The URL carries no identity — anyone holding it can read the object until it
+> expires. Authorisation happens when the ticket is issued, which is why the TTL
+> is minutes and a fresh ticket is issued per view rather than cached.
+
+Returns `404` when the lesson has no video — the same response as a missing
+lesson, so this cannot be used to enumerate which lessons have recordings ready.
 
 ---
 

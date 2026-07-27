@@ -19,6 +19,7 @@ import {
   useReorderModules,
 } from "@/features/courses/hooks/use-admin-courses";
 import { minutesToSeconds } from "@/features/courses/schemas";
+import { LessonVideoUploader } from "@/features/media/components/lesson-video-uploader";
 import {
   CONTENT_TYPE_LABELS,
   formatDuration,
@@ -250,10 +251,8 @@ function ModuleEditor({
         {module.lessons.length > 0 ? (
           <ol className="divide-y divide-border">
             {module.lessons.map((lesson, lessonIndex) => (
-              <li
-                key={lesson.id}
-                className="flex items-center gap-3 py-2 text-sm"
-              >
+              <li key={lesson.id} className="space-y-2 py-2">
+                <div className="flex items-center gap-3 text-sm">
                 <span className="flex-1 font-medium">{lesson.title}</span>
                 <Badge variant="neutral">
                   {CONTENT_TYPE_LABELS[lesson.content_type]}
@@ -300,7 +299,11 @@ function ModuleEditor({
                   >
                     <Trash2 className="h-4 w-4" aria-hidden="true" />
                   </Button>
+                  </div>
                 </div>
+                {lesson.content_type === "video" ? (
+                  <LessonVideoUploader courseId={courseId} lesson={lesson} />
+                ) : null}
               </li>
             ))}
           </ol>

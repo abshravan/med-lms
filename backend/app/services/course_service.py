@@ -17,9 +17,11 @@ from datetime import UTC, datetime
 
 from sqlalchemy.exc import IntegrityError
 
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.course import ContentStatus, Course, Lesson, Module
+from app.models.media import MediaAsset, MediaKind
 from app.repositories.course_repository import CourseRepository
 from app.schemas.common import Page, PaginationMeta
 from app.schemas.course import (
@@ -38,10 +40,34 @@ from app.schemas.course import (
     OrderedItem,
     ReorderResult,
 )
+from app.services.storage import StorageError, get_storage_provider
 from app.utils.pagination import clamp_limit, decode_cursor, encode_cursor
 from app.utils.slug import slugify, unique_slug
 
 logger = get_logger(__name__)
+
+
+def _cover_url(course: Course) -> str | None:
+    """Sign a course's cover image URL, if it has one.
+
+    A module-level helper rather than an injected dependency: signing is a pure
+    function of a storage key, and threading a provider through every projection
+    would couple the catalogue service to storage for one optional field. Tests
+    swap the backend via `set_storage_provider`.
+    """
+    asset = course.cover_asset
+    if asset is None or not asset.is_ready:
+        return None
+    try:
+        return get_storage_provider().create_presigned_download(
+            storage_key=asset.storage_key,
+            expires_in_seconds=get_settings().media_playback_url_ttl_seconds,
+        )
+    except StorageError:
+        # A cover image is decoration. Failing the whole catalogue because the
+        # object store hiccuped would be a poor trade.
+        logger.warning("cover_url_signing_failed", course_id=str(course.id))
+        return None
 
 
 class CourseService:
@@ -434,6 +460,76 @@ class CourseService:
             ]
         )
 
+    # ── Media attachment ─────────────────────────────────────────────────────
+
+    async def set_lesson_video(
+        self, lesson_id: uuid.UUID, asset: MediaAsset | None
+    ) -> LessonDetail:
+        """Attach or detach a lesson's video.
+
+        The asset's kind is checked here rather than trusted from the caller: a
+        cover image attached as a lesson video would render as a broken player,
+        and the size ceilings differ by kind.
+        """
+        lesson = await self._repo.get_lesson(lesson_id)
+        if lesson is None:
+            raise NotFoundError("That lesson could not be found.")
+
+        if asset is not None and asset.kind is not MediaKind.LESSON_VIDEO:
+            raise ValidationError(
+                "That file is not a lesson video.",
+                details=[
+                    {
+                        "field": "asset_id",
+                        "message": f"Expected a lesson video, got {asset.kind.value}.",
+                    }
+                ],
+            )
+
+        lesson.video_asset_id = asset.id if asset is not None else None
+        await self._repo.session.commit()
+        return LessonDetail.model_validate(lesson)
+
+    async def set_course_cover(
+        self, course_id: uuid.UUID, asset: MediaAsset | None
+    ) -> CourseDetail:
+        """Attach or detach a course cover image."""
+        course = await self._repo.get_by_id(course_id)
+        if course is None:
+            raise NotFoundError("That course could not be found.")
+
+        if asset is not None and asset.kind is not MediaKind.COURSE_COVER:
+            raise ValidationError(
+                "That file is not a cover image.",
+                details=[
+                    {
+                        "field": "asset_id",
+                        "message": f"Expected a cover image, got {asset.kind.value}.",
+                    }
+                ],
+            )
+
+        course.cover_asset_id = asset.id if asset is not None else None
+        await self._repo.session.commit()
+
+        refreshed = await self._repo.get_with_outline(course.id)
+        return self._to_detail(refreshed or course)
+
+    async def get_lesson_for_playback(self, *, course_slug: str, lesson_slug: str) -> Lesson:
+        """Load a published lesson, for issuing a playback URL.
+
+        Returns the model rather than a schema because the caller needs
+        `video_asset_id`, which is deliberately absent from the student-facing
+        response — a raw asset id is of no use to a client that must go through
+        this endpoint anyway.
+        """
+        lesson = await self._repo.get_published_lesson(
+            course_slug=course_slug, lesson_slug=lesson_slug
+        )
+        if lesson is None:
+            raise NotFoundError("That lesson could not be found.")
+        return lesson
+
     # ── Internals ────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -515,7 +611,7 @@ class CourseService:
             specialty=course.specialty,
             difficulty=course.difficulty,
             status=course.status,
-            cover_image_key=course.cover_image_key,
+            cover_image_url=_cover_url(course),
             lesson_count=lesson_count,
             total_duration_seconds=total_duration_seconds,
             published_at=course.published_at,
@@ -561,7 +657,7 @@ class CourseService:
             specialty=course.specialty,
             difficulty=course.difficulty,
             status=course.status,
-            cover_image_key=course.cover_image_key,
+            cover_image_url=_cover_url(course),
             lesson_count=len(lessons),
             total_duration_seconds=sum(lesson.duration_seconds or 0 for lesson in lessons),
             published_at=course.published_at,

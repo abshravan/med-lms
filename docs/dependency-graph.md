@@ -1,6 +1,6 @@
 # Dependency Graph
 
-> Updated with every feature. Current scope: **Features 1–2 — Authentication, Courses**.
+> Updated with every feature. Current scope: **Features 1–3 — Authentication, Courses, Media**.
 
 ---
 
@@ -21,9 +21,12 @@
                  └─────┬─────┘  └──────────────┘
                        │
                        ▼
-                 ┌───────────┐
-                 │redis :6379│  JWKS cache · revocation deny-list
-                 └───────────┘
+                 ┌───────────┐   ┌──────────────────┐
+                 │redis :6379│   │ Cloudflare R2    │
+                 └───────────┘   │ (S3-compatible)  │
+                                 └────────▲─────────┘
+                                          │ presigned PUT/GET
+                                   browser┘  — bytes never touch the API
 ```
 
 **Direction of trust.** `api` depends on `web` for public signing keys only. It
@@ -65,8 +68,14 @@ scale horizontally without coordinating with `web`.
               ├ auth (read-only)
               ├ profile
               ├ course
+              ├ media
               └ base
 ```
+
+`services/storage/` sits beside the services rather than in `core/`: it is a
+swappable backend with two implementations, not a cross-cutting concern. Only
+`media_service` and one helper in `course_service` (for signing cover URLs)
+depend on it.
 
 The catalogue follows the identical chain — `routers/courses` and
 `routers/admin_courses` → `services/course_service` →

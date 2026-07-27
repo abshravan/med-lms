@@ -42,6 +42,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.media import MediaAsset
 
 
 def _enum(enum_type: type[StrEnum], name: str) -> SAEnum:
@@ -107,9 +108,13 @@ class Course(Base, TimestampMixin):
         default=ContentStatus.DRAFT,
         server_default=ContentStatus.DRAFT.value,
     )
-    # Object key in Cloudflare R2. Populated by the media feature; the catalogue
-    # renders a placeholder while it is null.
-    cover_image_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Set once a cover image has been uploaded and confirmed. `SET NULL` rather
+    # than cascade: deleting an image must not delete the course.
+    cover_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Nullable so an author's account can be removed without destroying content.
     created_by: Mapped[str | None] = mapped_column(
@@ -123,10 +128,12 @@ class Course(Base, TimestampMixin):
         cascade="all, delete-orphan",
         order_by="Module.position",
     )
+    # `lazy="joined"` because every course read needs the cover's storage key to
+    # build a signed URL. Lazy loading would mean one extra SELECT per card in a
+    # 20-card catalogue grid.
+    cover_asset: Mapped[MediaAsset | None] = relationship(lazy="joined", viewonly=True)
 
     __table_args__ = (
-        # Required by the composite foreign key on `lessons` (see module docstring).
-        UniqueConstraint("id", name="uq_courses_id"),
         CheckConstraint(
             "(status <> 'published') OR (published_at IS NOT NULL)",
             name="published_has_timestamp",
@@ -214,6 +221,14 @@ class Lesson(Base, TimestampMixin):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The lesson's video. Nullable because a lesson is authored before its
+    # recording exists, and because reading and quiz lessons never have one.
+    # `SET NULL` rather than cascade: deleting an asset must not delete the lesson.
+    video_asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     module: Mapped[Module] = relationship(back_populates="lessons")
 

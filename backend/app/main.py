@@ -14,7 +14,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.redis import close_redis
 from app.middleware.error_handler import register_exception_handlers
 from app.middleware.request_context import REQUEST_ID_HEADER, RequestContextMiddleware
-from app.routers import admin_courses, auth, courses, health
+from app.routers import admin_courses, auth, courses, health, media
 
 logger = get_logger(__name__)
 
@@ -84,6 +84,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router, prefix=settings.api_v1_prefix)
     app.include_router(courses.router, prefix=settings.api_v1_prefix)
     app.include_router(admin_courses.router, prefix=settings.api_v1_prefix)
+    app.include_router(media.router, prefix=settings.api_v1_prefix)
+    app.include_router(media.local_router, prefix=settings.api_v1_prefix)
 
     return app
 

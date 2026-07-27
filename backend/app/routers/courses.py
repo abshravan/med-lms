@@ -15,9 +15,9 @@ from typing import Annotated
 from fastapi import Depends, Query
 from pydantic import ValidationError as PydanticValidationError
 
-from app.core.dependencies import CourseServiceDep, VerifiedUserDep
+from app.core.dependencies import CourseServiceDep, MediaServiceDep, VerifiedUserDep
 from app.core.envelope import create_router
-from app.core.exceptions import ValidationError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.schemas.common import Page, SuccessResponse
 from app.schemas.course import (
     CatalogueFilters,
@@ -25,6 +25,7 @@ from app.schemas.course import (
     CourseSummary,
     LessonDetail,
 )
+from app.schemas.media import PlaybackTicket
 
 router = create_router(prefix="/courses", tags=["courses"])
 
@@ -106,3 +107,34 @@ async def get_lesson(
 ) -> LessonDetail:
     """Return a single published lesson within a published course."""
     return await service.get_lesson(course_slug=slug, lesson_slug=lesson_slug)
+
+
+@router.get(
+    "/{slug}/lessons/{lesson_slug}/playback",
+    response_model=SuccessResponse[PlaybackTicket],
+    summary="Get a short-lived playback URL for a lesson's video",
+)
+async def get_lesson_playback(
+    slug: str,
+    lesson_slug: str,
+    courses: CourseServiceDep,
+    media: MediaServiceDep,
+    _user: VerifiedUserDep,
+) -> PlaybackTicket:
+    """Issue a signed URL for the lesson's video.
+
+    Authorisation happens here, not in the URL: the returned link carries no
+    identity, so anyone holding it can read the object until it expires. That is
+    why the TTL is minutes and a fresh ticket is issued per view rather than
+    cached by the client.
+
+    Returns `404` if the lesson has no video — the same response as a lesson that
+    does not exist, so this cannot be used to enumerate which lessons have
+    recordings ready.
+    """
+    lesson = await courses.get_lesson_for_playback(course_slug=slug, lesson_slug=lesson_slug)
+    if lesson.video_asset_id is None:
+        raise NotFoundError("No video is available for this lesson.")
+
+    asset = await media.get_ready_asset(lesson.video_asset_id)
+    return media.issue_playback_ticket(asset, duration_seconds=lesson.duration_seconds)

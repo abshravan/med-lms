@@ -43,7 +43,8 @@ export interface CourseSummary {
   specialty: string | null;
   difficulty: Difficulty;
   status: ContentStatus;
-  cover_image_key: string | null;
+  /** Short-lived signed URL, or null. The raw storage key is never exposed. */
+  cover_image_url: string | null;
   lesson_count: number;
   total_duration_seconds: number;
   published_at: string | null;

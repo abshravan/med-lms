@@ -15,7 +15,12 @@ from typing import Annotated
 
 from fastapi import Depends, Query, Response, status
 
-from app.core.dependencies import CourseServiceDep, CurrentUserDep, require_role
+from app.core.dependencies import (
+    CourseServiceDep,
+    CurrentUserDep,
+    MediaServiceDep,
+    require_role,
+)
 from app.core.envelope import create_router
 from app.models.course import ContentStatus
 from app.models.profile import UserRole
@@ -34,6 +39,7 @@ from app.schemas.course import (
     ReorderRequest,
     ReorderResult,
 )
+from app.schemas.media import AttachAssetRequest
 
 router = create_router(
     prefix="/admin",
@@ -259,3 +265,67 @@ async def reorder_lessons(
 ) -> ReorderResult:
     """Replace the lesson order within a module."""
     return await service.reorder_lessons(module_id, payload.ordered_ids)
+
+
+# ── Media attachment ─────────────────────────────────────────────────────────
+#
+# These orchestrate two services: the media service decides whether an asset is
+# usable, the course service decides where it may be attached. Keeping the
+# decision in each owner — rather than giving one service a handle on the other's
+# tables — is why the router does the sequencing.
+
+
+@router.put(
+    "/lessons/{lesson_id}/video",
+    response_model=SuccessResponse[LessonDetail],
+    summary="Attach a video to a lesson",
+)
+async def attach_lesson_video(
+    lesson_id: uuid.UUID,
+    payload: AttachAssetRequest,
+    courses: CourseServiceDep,
+    media: MediaServiceDep,
+) -> LessonDetail:
+    """Attach a confirmed video asset to a lesson.
+
+    The asset must already be `ready` — attaching a still-uploading file would
+    publish a lesson whose video 404s.
+    """
+    asset = await media.get_ready_asset(payload.asset_id)
+    return await courses.set_lesson_video(lesson_id, asset)
+
+
+@router.delete(
+    "/lessons/{lesson_id}/video",
+    response_model=SuccessResponse[LessonDetail],
+    summary="Detach a lesson's video",
+)
+async def detach_lesson_video(lesson_id: uuid.UUID, courses: CourseServiceDep) -> LessonDetail:
+    """Remove the video from a lesson. The asset itself is left in storage."""
+    return await courses.set_lesson_video(lesson_id, None)
+
+
+@router.put(
+    "/courses/{course_id}/cover",
+    response_model=SuccessResponse[CourseDetail],
+    summary="Attach a cover image to a course",
+)
+async def attach_course_cover(
+    course_id: uuid.UUID,
+    payload: AttachAssetRequest,
+    courses: CourseServiceDep,
+    media: MediaServiceDep,
+) -> CourseDetail:
+    """Attach a confirmed image asset as the course cover."""
+    asset = await media.get_ready_asset(payload.asset_id)
+    return await courses.set_course_cover(course_id, asset)
+
+
+@router.delete(
+    "/courses/{course_id}/cover",
+    response_model=SuccessResponse[CourseDetail],
+    summary="Remove a course cover image",
+)
+async def detach_course_cover(course_id: uuid.UUID, courses: CourseServiceDep) -> CourseDetail:
+    """Remove the cover image from a course."""
+    return await courses.set_course_cover(course_id, None)

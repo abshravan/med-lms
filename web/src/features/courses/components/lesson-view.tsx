@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLesson } from "@/features/courses/hooks/use-catalogue";
 import { CONTENT_TYPE_LABELS, formatDuration } from "@/features/courses/types";
+import { LessonVideoPlayer } from "@/features/media/components/lesson-video-player";
 
 export interface LessonViewProps {
   courseSlug: string;
@@ -83,21 +84,23 @@ export function LessonView({ courseSlug, lessonSlug }: LessonViewProps) {
         ) : null}
       </div>
 
-      <Card>
-        <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
-          <Construction className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
-          <div>
-            <p className="font-medium">Lesson content is coming soon</p>
-            <p className="text-sm text-muted-foreground">
-              {lesson.content_type === "video"
-                ? "Video playback arrives with the media pipeline."
-                : lesson.content_type === "reading"
+      {lesson.content_type === "video" ? (
+        <LessonVideoPlayer courseSlug={courseSlug} lessonSlug={lessonSlug} />
+      ) : (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+            <Construction className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+            <div>
+              <p className="font-medium">Lesson content is coming soon</p>
+              <p className="text-sm text-muted-foreground">
+                {lesson.content_type === "reading"
                   ? "Lesson notes arrive with the notes feature."
                   : "Quizzes arrive with the assessment feature."}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

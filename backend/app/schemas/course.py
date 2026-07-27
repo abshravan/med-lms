@@ -211,7 +211,10 @@ class CourseSummary(BaseModel):
     specialty: str | None
     difficulty: Difficulty
     status: ContentStatus
-    cover_image_key: str | None
+    # A short-lived signed URL, or null when the course has no cover.
+    # The raw storage key is never exposed — it would be a stable, guessable
+    # handle on an object the client can only reach through a signed link.
+    cover_image_url: str | None
     lesson_count: int
     total_duration_seconds: int
     published_at: datetime | None

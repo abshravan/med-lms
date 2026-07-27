@@ -36,7 +36,7 @@ function makeCourse(overrides: Partial<CourseSummary> = {}): CourseSummary {
     specialty: "Cardiology",
     difficulty: "foundation",
     status: "published",
-    cover_image_key: null,
+    cover_image_url: null,
     lesson_count: 6,
     total_duration_seconds: 3600,
     published_at: "2026-07-01T00:00:00Z",

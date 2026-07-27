@@ -20,6 +20,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import Settings, get_settings
 from app.core.database import get_db_session
 from app.core.exceptions import ForbiddenError, SessionRevokedError, UnauthenticatedError
 from app.core.redis import is_revoked
@@ -27,9 +28,12 @@ from app.core.security import TokenClaims, verify_access_token
 from app.middleware.request_context import get_request_id
 from app.models.profile import UserRole
 from app.repositories.course_repository import CourseRepository
+from app.repositories.media_repository import MediaRepository
 from app.repositories.user_repository import UserRepository
 from app.services.auth_service import AuthenticatedUser, AuthService, RequestContext
 from app.services.course_service import CourseService
+from app.services.media_service import MediaService
+from app.services.storage import StorageProvider, get_storage_provider
 
 # auto_error=False so a missing header raises our own enveloped 401 rather than
 # FastAPI's bare `{"detail": ...}`, which would break the response contract.
@@ -78,6 +82,32 @@ def get_course_service(
 
 
 CourseServiceDep = Annotated[CourseService, Depends(get_course_service)]
+
+
+def get_media_repository(session: SessionDep) -> MediaRepository:
+    """Provide a request-scoped media repository."""
+    return MediaRepository(session)
+
+
+def get_storage() -> StorageProvider:
+    """Provide the configured storage backend.
+
+    A dependency rather than a direct import so tests can override the backend
+    per-request without touching the process-wide factory.
+    """
+    return get_storage_provider()
+
+
+def get_media_service(
+    repository: Annotated[MediaRepository, Depends(get_media_repository)],
+    storage: Annotated[StorageProvider, Depends(get_storage)],
+) -> MediaService:
+    """Provide a request-scoped media service."""
+    settings: Settings = get_settings()
+    return MediaService(repository, storage, settings)
+
+
+MediaServiceDep = Annotated[MediaService, Depends(get_media_service)]
 
 
 async def get_token_claims(

@@ -16,6 +16,9 @@ dependencies = [
     "httpx>=0.28.0",
     "email-validator>=2.2.0",
     "structlog>=24.4.0",
+    # S3-compatible client. Cloudflare R2 speaks the S3 API, so one client
+    # covers R2 in production and MinIO/moto in development and tests.
+    "boto3>=1.35.0",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +31,9 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "respx>=0.22.0",
+    # Runs a real in-process S3 server, so presigned URLs are exercised with
+    # actual PUT/GET traffic rather than asserted on as strings.
+    "moto[s3,server]>=5.0.0",
 ]
 
 [build-system]
@@ -63,5 +69,8 @@ warn_unused_ignores = true
 disallow_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["fakeredis.*", "alembic.*"]
+# boto3 publishes no py.typed marker. `boto3-stubs` is tens of megabytes of
+# generated code for the single S3 client used here, so the untyped import is
+# accepted and `S3StorageProvider` annotates its own public surface instead.
+module = ["fakeredis.*", "alembic.*", "boto3.*", "botocore.*"]
 ignore_missing_imports = true

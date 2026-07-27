@@ -1,6 +1,6 @@
 # Database Schema
 
-> Updated with every feature. Current scope: **Features 1–2 — Authentication, Courses**.
+> Updated with every feature. Current scope: **Features 1–3 — Authentication, Courses, Media**.
 
 One PostgreSQL 16 database, two schemas, **two migration owners that never touch
 each other's tables**.
@@ -8,7 +8,7 @@ each other's tables**.
 | Schema | Owner | Migrated by | Contents |
 | --- | --- | --- | --- |
 | `auth` | Better Auth | `better-auth` CLI (Node) | `user`, `session`, `account`, `verification`, `jwks` |
-| `public` | Application | Alembic (Python) | `user_profiles`, `auth_audit_log`, `courses`, `modules`, `lessons` |
+| `public` | Application | Alembic (Python) | `user_profiles`, `auth_audit_log`, `courses`, `modules`, `lessons`, `media_assets` |
 
 Rationale in [architecture.md §5.1](./architecture.md#51-schema-ownership--the-rule-that-keeps-this-maintainable).
 
@@ -304,12 +304,62 @@ one is missed. Course counts are in the hundreds, and the aggregate uses
 
 ---
 
+## 5c. `public.media_assets`
+
+One row per object in storage, created **before** the bytes exist.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `uuid` | PK |
+| `kind` | `media_kind` | `lesson_video` \| `course_cover` \| `lesson_attachment` |
+| `status` | `media_status` | `pending` → `ready` \| `failed` |
+| `storage_key` | `varchar(512)` | **Unique.** Server-generated; a retried upload cannot overwrite a confirmed asset |
+| `original_filename` | `varchar(255)` | Only for `Content-Disposition`; never used to build a path |
+| `content_type` | `varchar(127)` | Bound into the upload signature |
+| `size_bytes` | `bigint` | Client's claim until confirmation, then storage's real value. `bigint` because a 4 GB lecture overflows `int4` |
+| `checksum` | `varchar(128)` | ETag or client-supplied |
+| `confirmed_at` | `timestamptz` | Set when the object is verified present |
+| `uploaded_by` | `varchar(255)` | FK → `user_profiles`, `ON DELETE SET NULL` |
+
+**Constraints:** `ck_media_assets_size_non_negative`, and
+`ck_media_assets_ready_is_confirmed` — a `ready` asset must have both
+`confirmed_at` and `size_bytes`, so the verification step cannot be bypassed even
+by a direct SQL write.
+
+**Indexes:** `(status, created_at)` — serves the orphan-cleanup job;
+`(uploaded_by)`.
+
+### Linkage
+
+`lessons.video_asset_id` and `courses.cover_asset_id` both reference
+`media_assets.id` with `ON DELETE SET NULL`. Deleting a video must not delete the
+lesson.
+
+`Course.cover_asset` is a `lazy="joined"` relationship: every course read needs
+the cover's storage key to build a signed URL, and lazy loading would mean one
+extra `SELECT` per card in a 20-card catalogue grid.
+
+> **Migration note.** `courses.cover_image_key` (a raw string, added in Feature 2
+> and never populated) was replaced by the typed `cover_asset_id` foreign key.
+> The API field became `cover_image_url` — a signed URL — because the raw storage
+> key is a stable, guessable handle that clients have no use for.
+
+### The lifecycle is the point
+
+`status` is not decoration. With direct-to-storage uploads the API sees no bytes,
+so `pending` genuinely means "a URL was issued and we do not know what happened".
+`ready` is only set after the server HEADs the object. See
+[features/media.md §2](./features/media.md).
+
+---
+
 ## 6. Operational follow-ups
 
 | Task | When | Why |
 | --- | --- | --- |
 | Monthly partition-creation job | Before month 24 | Keeps rows out of the default partition, so new partitions can still be attached |
 | Detach partitions older than 24 months | Ongoing | Retention; keeps the table small |
+| Orphan media cleanup (`pending` assets past the upload TTL) | With the first worker |
 | PgBouncer (transaction mode) | Before ~10k DAU | At 100k users, pooling matters more than query tuning. `statement_cache_size=0` is already set for compatibility |
 | Read replica | ~25k DAU | Move analytics off the primary |
 

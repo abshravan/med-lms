@@ -4,7 +4,7 @@ A medical education platform: video lessons, lecture notes, downloadable PDFs,
 progress tracking, bookmarks, AI-generated flashcards, quizzes, and AI-powered
 voice viva practice — across web and mobile.
 
-**Current status:** Authentication and the course catalogue are complete. The media pipeline is next.
+**Current status:** Authentication, the course catalogue, and media upload/playback are complete. HLS transcoding and lesson notes are next.
 
 ---
 
@@ -15,7 +15,7 @@ voice viva practice — across web and mobile.
 | Frontend | Next.js 15 · TypeScript · Tailwind CSS v4 · shadcn/ui · TanStack Query · React Hook Form · Zod |
 | Backend | FastAPI · SQLAlchemy 2 · Alembic · PostgreSQL 16 · Redis 7 |
 | Identity | Better Auth (in Next.js), ES256 JWTs verified by FastAPI |
-| Storage | Cloudflare R2 *(planned)* |
+| Storage | Cloudflare R2 (S3-compatible; local filesystem backend for dev) |
 | Realtime | WebSocket · OpenAI Realtime / Gemini Live *(planned)* |
 | Deployment | Docker · Docker Compose |
 
@@ -92,13 +92,13 @@ pnpm dev
 ```bash
 # Backend — needs a PostgreSQL instance; set TEST_DATABASE_URL
 cd backend
-pytest                        # 120 tests
+pytest                        # 149 tests
 ruff check app tests alembic
 mypy app                      # strict
 
 # Web
 cd web
-pnpm test                     # 111 tests
+pnpm test                     # 131 tests
 pnpm typecheck
 pnpm lint
 ```
@@ -138,6 +138,7 @@ Full reasoning, tradeoffs, and scaling plan: **[docs/architecture.md](docs/archi
 | [dependency-graph.md](docs/dependency-graph.md) | Module graph and package rationale |
 | [features/authentication.md](docs/features/authentication.md) | Feature 1: what was built, security properties, known debt |
 | [features/courses.md](docs/features/courses.md) | Feature 2: catalogue design, ordering, publication lifecycle |
+| [features/media.md](docs/features/media.md) | Feature 3: direct upload, verified confirmation, signed playback |
 
 ---
 
@@ -164,10 +165,11 @@ Full reasoning, tradeoffs, and scaling plan: **[docs/architecture.md](docs/archi
 
 1. ~~Authentication~~ ✅
 2. ~~Courses & lessons~~ ✅ — catalogue, modules, admin authoring
-3. **Media pipeline** — R2 upload, HLS transcode, signed playback
-4. Notes & PDFs
-5. Progress tracking & bookmarks
-6. AI flashcards
-7. Quizzes
-8. Voice viva (realtime)
-9. Analytics
+3. ~~Media upload & playback~~ ✅ — direct-to-R2 upload, signed playback
+4. **HLS transcoding** — encoding ladder, worker, CDN signed cookies
+5. Notes & PDFs
+6. Progress tracking & bookmarks
+7. AI flashcards
+8. Quizzes
+9. Voice viva (realtime)
+10. Analytics

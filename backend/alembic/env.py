@@ -32,6 +32,7 @@ from app.core.config import get_settings
 # Importing the model modules registers them on Base.metadata for autogenerate.
 from app.models import auth as auth_models  # noqa: F401
 from app.models import course as course_models  # noqa: F401
+from app.models import media as media_models  # noqa: F401
 from app.models import profile as profile_models  # noqa: F401
 from app.models.base import EXTERNALLY_MANAGED, Base
 

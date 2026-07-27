@@ -1,6 +1,6 @@
 # Folder Structure
 
-> Updated with every feature. Current scope: **Features 1–2 — Authentication, Courses**.
+> Updated with every feature. Current scope: **Features 1–3 — Authentication, Courses, Media**.
 
 ```
 med-lms/
@@ -13,7 +13,8 @@ med-lms/
 │   ├── dependency-graph.md       module dependencies + package rationale
 │   └── features/
 │       ├── authentication.md     Feature 1 implementation notes
-│       └── courses.md            Feature 2 implementation notes
+│       ├── courses.md            Feature 2 implementation notes
+│       └── media.md              Feature 3 implementation notes
 ├── infra/
 │   └── postgres/
 │       ├── init/01-schemas.sql               runs on first container init
@@ -45,22 +46,31 @@ med-lms/
 │   │   │   ├── base.py           declarative base, naming convention
 │   │   │   ├── auth.py           read-only mapping of auth.user
 │   │   │   ├── profile.py        user_profiles, auth_audit_log
-│   │   │   └── course.py         courses, modules, lessons
+│   │   │   ├── course.py         courses, modules, lessons
+│   │   │   └── media.py          media_assets + upload lifecycle
 │   │   ├── schemas/              Pydantic — the API contract
 │   │   │   ├── common.py         envelope, pagination
 │   │   │   ├── auth.py
-│   │   │   └── course.py
+│   │   │   ├── course.py
+│   │   │   └── media.py          type allowlist + size ceilings
 │   │   ├── repositories/         the only layer that knows SQLAlchemy
 │   │   │   ├── base.py
 │   │   │   ├── user_repository.py
-│   │   │   └── course_repository.py
+│   │   │   ├── course_repository.py
+│   │   │   └── media_repository.py
 │   │   ├── services/             business logic + transaction boundaries
 │   │   │   ├── auth_service.py
-│   │   │   └── course_service.py
+│   │   │   ├── course_service.py
+│   │   │   ├── media_service.py   upload tickets, verified confirmation
+│   │   │   └── storage/          object-storage abstraction
+│   │   │       ├── base.py        StorageProvider protocol
+│   │   │       ├── s3.py          R2 / MinIO / AWS
+│   │   │       └── local.py       development filesystem backend
 │   │   ├── routers/              HTTP surface, one module per feature
 │   │   │   ├── auth.py
 │   │   │   ├── courses.py        student catalogue
 │   │   │   ├── admin_courses.py  authoring; role guard on the router
+│   │   │   ├── media.py          uploads + dev-only local object routes
 │   │   │   └── health.py
 │   │   ├── middleware/
 │   │   │   ├── request_context.py  correlation id, access log
@@ -77,7 +87,8 @@ med-lms/
 │       └── integration/
 │           ├── test_auth_router.py
 │           ├── test_courses.py
-│           └── test_admin_courses.py
+│           ├── test_admin_courses.py
+│           └── test_media.py      runs against an in-process S3 server
 │
 └── web/                          ── Next.js 15 app + identity authority ──
     ├── package.json
@@ -92,7 +103,8 @@ med-lms/
     │   ├── login-form.test.tsx
     │   ├── register-form.test.tsx
     │   ├── course-schemas.test.ts
-    │   └── course-catalogue.test.tsx
+    │   ├── course-catalogue.test.tsx
+    │   └── media-upload.test.ts
     └── src/
         ├── middleware.ts         redirect optimisation — NOT a security boundary
         ├── app/                  routes only; no business logic
@@ -119,12 +131,18 @@ med-lms/
         │   │   ├── hooks/        TanStack Query hooks
         │   │   ├── schemas/      zod — one source of truth for form rules
         │   │   └── types/        mirrors backend/app/schemas/auth.py
-        │   └── courses/
-        │       ├── api/          student + admin calls, kept separate
-        │       ├── components/   catalogue, outline, editor, forms
-        │       ├── hooks/        useCatalogue (infinite), admin mutations
-        │       ├── schemas/      zod + duration conversion
-        │       └── types/        mirrors backend/app/schemas/course.py
+        │   ├── courses/
+        │   │   ├── api/          student + admin calls, kept separate
+        │   │   ├── components/   catalogue, outline, editor, forms
+        │   │   ├── hooks/        useCatalogue (infinite), admin mutations
+        │   │   ├── schemas/      zod + duration conversion
+        │   │   └── types/        mirrors backend/app/schemas/course.py
+        │   └── media/
+        │       ├── api/          ticket + confirm (enveloped) and the raw
+        │       │                 XHR upload straight to storage
+        │       ├── components/   uploader, video player
+        │       ├── hooks/        useUpload — three-phase progress machine
+        │       └── types/        allowlist + ceilings, mirroring the server
         ├── hooks/                cross-cutting hooks (see its README)
         ├── services/             cross-cutting client services (see its README)
         ├── lib/
