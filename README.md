@@ -4,7 +4,7 @@ A medical education platform: video lessons, lecture notes, downloadable PDFs,
 progress tracking, bookmarks, AI-generated flashcards, quizzes, and AI-powered
 voice viva practice — across web and mobile.
 
-**Current status:** Feature 1 (Authentication) is complete. Course content is next.
+**Current status:** Authentication and the course catalogue are complete. The media pipeline is next.
 
 ---
 
@@ -92,13 +92,13 @@ pnpm dev
 ```bash
 # Backend — needs a PostgreSQL instance; set TEST_DATABASE_URL
 cd backend
-pytest                        # 47 tests
+pytest                        # 120 tests
 ruff check app tests alembic
 mypy app                      # strict
 
 # Web
 cd web
-pnpm test                     # 64 tests
+pnpm test                     # 111 tests
 pnpm typecheck
 pnpm lint
 ```
@@ -137,6 +137,7 @@ Full reasoning, tradeoffs, and scaling plan: **[docs/architecture.md](docs/archi
 | [folder-tree.md](docs/folder-tree.md) | Directory layout and placement rules |
 | [dependency-graph.md](docs/dependency-graph.md) | Module graph and package rationale |
 | [features/authentication.md](docs/features/authentication.md) | Feature 1: what was built, security properties, known debt |
+| [features/courses.md](docs/features/courses.md) | Feature 2: catalogue design, ordering, publication lifecycle |
 
 ---
 
@@ -162,8 +163,8 @@ Full reasoning, tradeoffs, and scaling plan: **[docs/architecture.md](docs/archi
 ## Roadmap
 
 1. ~~Authentication~~ ✅
-2. **Courses & lessons** — catalogue, modules, admin authoring
-3. Media pipeline — R2 upload, HLS transcode, signed playback
+2. ~~Courses & lessons~~ ✅ — catalogue, modules, admin authoring
+3. **Media pipeline** — R2 upload, HLS transcode, signed playback
 4. Notes & PDFs
 5. Progress tracking & bookmarks
 6. AI flashcards

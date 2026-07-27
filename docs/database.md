@@ -1,6 +1,6 @@
 # Database Schema
 
-> Updated with every feature. Current scope: **Feature 1 — Authentication**.
+> Updated with every feature. Current scope: **Features 1–2 — Authentication, Courses**.
 
 One PostgreSQL 16 database, two schemas, **two migration owners that never touch
 each other's tables**.
@@ -8,7 +8,7 @@ each other's tables**.
 | Schema | Owner | Migrated by | Contents |
 | --- | --- | --- | --- |
 | `auth` | Better Auth | `better-auth` CLI (Node) | `user`, `session`, `account`, `verification`, `jwks` |
-| `public` | Application | Alembic (Python) | `user_profiles`, `auth_audit_log` |
+| `public` | Application | Alembic (Python) | `user_profiles`, `auth_audit_log`, `courses`, `modules`, `lessons` |
 
 Rationale in [architecture.md §5.1](./architecture.md#51-schema-ownership--the-rule-that-keeps-this-maintainable).
 
@@ -201,6 +201,106 @@ schema entirely, so `--autogenerate` cannot emit a `DROP TABLE auth.user`.
 
 `auth.jwks` holds the ES256 signing keys; private keys are encrypted at rest with
 `BETTER_AUTH_SECRET`.
+
+---
+
+## 5b. Course catalogue
+
+```
+┌──────────────────────────────┐
+│ public.courses               │
+│──────────────────────────────│
+│ id            uuid   PK      │
+│ slug          varchar(160) UQ│  immutable once published
+│ title         varchar(200)   │
+│ subtitle      varchar(300)   │
+│ description   text           │
+│ specialty     varchar(120)   │
+│ difficulty    course_difficulty
+│ status        content_status │  draft | published | archived
+│ cover_image_key varchar(512) │  R2 key; populated by Feature 3
+│ published_at  timestamptz    │
+│ created_by    → user_profiles│  ON DELETE SET NULL
+│ created_at / updated_at      │
+└──────┬───────────────────────┘
+       │ 1:N  (ON DELETE CASCADE)
+┌──────▼───────────────────────┐
+│ public.modules               │
+│──────────────────────────────│
+│ id        uuid  PK           │
+│ course_id uuid  FK           │
+│ title     varchar(200)       │
+│ summary   text               │
+│ position  int                │  UNIQUE(course_id, position) DEFERRABLE
+└──────┬───────────────────────┘
+       │ 1:N  (composite FK, ON DELETE CASCADE)
+┌──────▼───────────────────────┐
+│ public.lessons               │
+│──────────────────────────────│
+│ id         uuid PK           │
+│ module_id  uuid ┐            │
+│ course_id  uuid ┘ composite FK → modules(id, course_id)
+│ slug       varchar(160)      │  UNIQUE(course_id, slug)
+│ title      varchar(200)      │
+│ summary    text              │
+│ content_type lesson_content_type   video | reading | quiz
+│ duration_seconds int         │  CHECK > 0
+│ is_free_preview  bool        │
+│ status     content_status    │
+│ position   int               │  UNIQUE(module_id, position) DEFERRABLE
+│ published_at timestamptz     │
+│ created_at / updated_at      │
+└──────────────────────────────┘
+```
+
+**Enums:** `content_status` (`draft`/`published`/`archived`),
+`course_difficulty` (`foundation`/`intermediate`/`advanced`),
+`lesson_content_type` (`video`/`reading`/`quiz`).
+
+**Indexes:** `ix_courses_status_published_at` (covers the catalogue's default
+query), `ix_courses_specialty`, `ix_modules_course_id_position`,
+`ix_lessons_module_id_position`, `ix_lessons_course_id_status` (serves the
+per-course lesson-count aggregate).
+
+### Two guarantees enforced by the schema
+
+**A lesson's course cannot disagree with its module's.** `lessons.course_id` is
+denormalised so future progress, bookmark, and quiz tables can filter by course
+without a join. The foreign key is composite —
+`(module_id, course_id) → modules(id, course_id)` — so Postgres rejects any
+mismatch. The convenience is kept; the drift risk is removed.
+
+**Reordering is atomic.** Both position constraints are
+`DEFERRABLE INITIALLY DEFERRED`. A reorder rewrites every position in one
+transaction and uniqueness is checked once at `COMMIT`, so the transient states
+where two rows share a slot are legal. Without deferral, reordering would need
+sparse positions (which drift) or a temporary-offset workaround.
+
+**`ck_courses_published_has_timestamp`** makes a published course with a null
+`published_at` impossible — that combination would break both the catalogue's
+ordering and its pagination cursor.
+
+### Deletion policy
+
+| Entity | Policy | Why |
+| --- | --- | --- |
+| Course | **Archived**, never deleted | Progress, bookmarks, and quiz attempts will reference it |
+| Module | Hard delete (cascades to lessons) | Organisational container; nothing points at it yet |
+| Lesson | Hard delete | Same — **revisit before the progress feature** |
+
+Deleting a module or lesson renumbers its remaining siblings so positions stay
+contiguous; a gap would make the next append land on an unexpected index.
+
+### Counts are computed, not stored
+
+`lesson_count` and `total_duration_seconds` are aggregated per request rather
+than kept as counter columns. Counters would need maintaining on insert, update,
+delete, publish, and reorder — five places to forget — and drift silently when
+one is missed. Course counts are in the hundreds, and the aggregate uses
+`ix_lessons_course_id_status`.
+
+> Revisit above ~10,000 courses, or if the catalogue query appears in slow logs.
+> The fix is a trigger-maintained counter, not application-maintained.
 
 ---
 

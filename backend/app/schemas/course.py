@@ -210,6 +210,7 @@ class CourseSummary(BaseModel):
     subtitle: str | None
     specialty: str | None
     difficulty: Difficulty
+    status: ContentStatus
     cover_image_key: str | None
     lesson_count: int
     total_duration_seconds: int
@@ -220,7 +221,6 @@ class CourseDetail(CourseSummary):
     """A course with its full outline."""
 
     description: str | None
-    status: ContentStatus
     modules: list[ModuleRead]
     created_at: datetime
     updated_at: datetime

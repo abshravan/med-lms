@@ -10,6 +10,8 @@ export interface AppHeaderProps {
   displayName: string;
   email: string;
   emailVerified: boolean;
+  /** Shows the admin link. Authorisation itself is enforced server-side. */
+  isAdmin: boolean;
 }
 
 /**
@@ -19,15 +21,35 @@ export interface AppHeaderProps {
  * is passed down from the server layout — so the header never has to fetch the
  * session itself, and there is no authenticated-but-empty flash on first paint.
  */
-export function AppHeader({ displayName, email, emailVerified }: AppHeaderProps) {
+export function AppHeader({
+  displayName,
+  email,
+  emailVerified,
+  isAdmin,
+}: AppHeaderProps) {
   const { signOut, isSigningOut } = useSignOut();
 
   return (
     <header className="border-b border-border">
       <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-4">
-        <Link href="/dashboard" className="text-lg font-bold tracking-tight text-primary">
-          MedLMS
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link
+            href="/dashboard"
+            className="text-lg font-bold tracking-tight text-primary"
+          >
+            MedLMS
+          </Link>
+          <nav className="flex items-center gap-4 text-sm" aria-label="Main">
+            <Link href="/courses" className="hover:text-primary">
+              Courses
+            </Link>
+            {isAdmin ? (
+              <Link href="/admin/courses" className="hover:text-primary">
+                Admin
+              </Link>
+            ) : null}
+          </nav>
+        </div>
 
         <div className="flex items-center gap-4">
           <div className="hidden text-right sm:block">

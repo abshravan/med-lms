@@ -36,6 +36,7 @@ export default async function AppLayout({
         displayName={session.user.name ?? session.user.email}
         email={session.user.email}
         emailVerified={session.user.emailVerified}
+        isAdmin={session.user.role === "admin"}
       />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
     </div>

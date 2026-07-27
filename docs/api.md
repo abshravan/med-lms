@@ -1,6 +1,6 @@
 # API Reference
 
-> Updated with every feature. Current scope: **Feature 1 — Authentication**.
+> Updated with every feature. Current scope: **Features 1–2 — Authentication, Courses**.
 
 Two API surfaces, on two origins, with different owners:
 
@@ -262,6 +262,114 @@ The role is read from the **database**, not from the token claim. A token
 asserting `role: admin` for a user who is a student in Postgres receives
 `403 FORBIDDEN` — this closes the window where a token minted before a demotion
 still claims the old role.
+
+---
+
+## 4b. Catalogue endpoints (FastAPI)
+
+All require an authenticated **and email-verified** caller. Draft or archived
+content returns `404`, never `403`, so these endpoints cannot be used to probe
+for unreleased courses.
+
+### `GET /api/v1/courses`
+
+One cursor-paginated page of the published catalogue, newest first.
+
+| Query | Type | Notes |
+| --- | --- | --- |
+| `q` | string ≤120 | Matches title, subtitle, or specialty (case-insensitive) |
+| `specialty` | string ≤120 | Exact match |
+| `difficulty` | enum | `foundation` \| `intermediate` \| `advanced` |
+| `limit` | int 1–100 | Default 20 |
+| `cursor` | string | Opaque; from the previous page's `next_cursor` |
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [{
+      "id": "5b94d3e9-…", "slug": "clinical-cardiology",
+      "title": "Clinical Cardiology", "subtitle": null,
+      "specialty": "Cardiology", "difficulty": "intermediate",
+      "status": "published", "cover_image_key": null,
+      "lesson_count": 3, "total_duration_seconds": 2700,
+      "published_at": "2026-07-26T13:40:52.757006Z"
+    }],
+    "pagination": { "next_cursor": null, "has_more": false, "limit": 20 }
+  },
+  "message": ""
+}
+```
+
+A malformed `cursor` or an unknown `difficulty` returns `422 VALIDATION_ERROR`
+with the offending field named. `limit` above 100 is rejected rather than
+silently clamped — an unbounded page size is a cheap denial-of-service.
+
+### `GET /api/v1/courses/{slug}`
+
+A published course with its outline. Adds `description`, `created_at`,
+`updated_at`, and `modules[]`, each carrying `lessons[]`. **Unpublished lessons
+are excluded at the query level**, so they never reach the response.
+
+### `GET /api/v1/courses/{slug}/lessons/{lesson_slug}`
+
+A single published lesson within a published course. Both must be published —
+the guards compose, so a published lesson inside a draft course stays invisible.
+
+---
+
+## 4c. Admin authoring endpoints (FastAPI)
+
+Every route below requires role `admin`, enforced by a guard declared **once on
+the router**. The role is re-read from Postgres, not taken from the token claim.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/courses` | List all courses; `?status=` filters |
+| `POST` | `/api/v1/admin/courses` | Create a **draft** course → `201` |
+| `GET` | `/api/v1/admin/courses/{id}` | Course with full outline, drafts included |
+| `PATCH` | `/api/v1/admin/courses/{id}` | Partial update |
+| `POST` | `/api/v1/admin/courses/{id}/publish` | Publish, cascading to draft lessons |
+| `POST` | `/api/v1/admin/courses/{id}/archive` | Remove from the catalogue |
+| `POST` | `/api/v1/admin/courses/{id}/modules` | Append a module → `201` |
+| `PATCH` | `/api/v1/admin/modules/{id}` | Update a module |
+| `DELETE` | `/api/v1/admin/modules/{id}` | Delete module + its lessons → `204` |
+| `PUT` | `/api/v1/admin/courses/{id}/module-order` | Replace module order |
+| `POST` | `/api/v1/admin/modules/{id}/lessons` | Append a lesson → `201` |
+| `PATCH` | `/api/v1/admin/lessons/{id}` | Update a lesson |
+| `POST` | `/api/v1/admin/lessons/{id}/publish` | Make a lesson visible |
+| `POST` | `/api/v1/admin/lessons/{id}/unpublish` | Hide without deleting |
+| `DELETE` | `/api/v1/admin/lessons/{id}` | Delete a lesson → `204` |
+| `PUT` | `/api/v1/admin/modules/{id}/lesson-order` | Replace lesson order |
+
+**Create/update bodies** accept `title` (required on create), `slug`, `subtitle`,
+`description`, `specialty`, `difficulty`. `status` is **absent by design** —
+publishing runs checks, and a writable status field would bypass them. Unknown
+fields are rejected with `422`.
+
+**Slugs.** Omitted → derived from the title, deduplicated (`anatomy`,
+`anatomy-2`). Supplied but malformed → `422` with the corrected form suggested,
+never a silent rewrite. A published course's slug is immutable → `409 CONFLICT`.
+
+**Publishing** an empty course → `422`; a published course with no lessons is a
+broken landing page. Publishing is idempotent and preserves the original
+`published_at`.
+
+**Reordering** replaces the whole sibling set:
+
+```json
+PUT /api/v1/admin/modules/{id}/lesson-order
+{ "ordered_ids": ["uuid-c", "uuid-a", "uuid-b"] }
+
+→ { "success": true, "data": { "items": [
+      { "id": "uuid-c", "position": 0 },
+      { "id": "uuid-a", "position": 1 },
+      { "id": "uuid-b", "position": 2 } ] }, "message": "" }
+```
+
+The list must contain **exactly** the current members. A partial list or a
+foreign id returns `422` — otherwise omitted items would be silently relocated,
+or content dragged in from another course.
 
 ---
 

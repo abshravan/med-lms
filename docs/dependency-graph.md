@@ -1,6 +1,6 @@
 # Dependency Graph
 
-> Updated with every feature. Current scope: **Feature 1 — Authentication**.
+> Updated with every feature. Current scope: **Features 1–2 — Authentication, Courses**.
 
 ---
 
@@ -64,8 +64,16 @@ scale horizontally without coordinating with `web`.
                    models/
               ├ auth (read-only)
               ├ profile
+              ├ course
               └ base
 ```
+
+The catalogue follows the identical chain — `routers/courses` and
+`routers/admin_courses` → `services/course_service` →
+`repositories/course_repository` → `models/course` — plus two leaf utilities
+(`utils/slug`, `utils/pagination`) that depend on nothing but the stdlib and
+`core/exceptions`. Adding a second feature required no change to any layer
+contract, which is the point of fixing them in Feature 1.
 
 Acyclic by construction. Every arrow points toward more stable code: routers
 change often, `models` and `core` rarely.

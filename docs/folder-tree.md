@@ -1,6 +1,6 @@
 # Folder Structure
 
-> Updated with every feature. Current scope: **Feature 1 — Authentication**.
+> Updated with every feature. Current scope: **Features 1–2 — Authentication, Courses**.
 
 ```
 med-lms/
@@ -12,7 +12,8 @@ med-lms/
 │   ├── database.md               schema, ER diagram, migration order
 │   ├── dependency-graph.md       module dependencies + package rationale
 │   └── features/
-│       └── authentication.md     Feature 1 implementation notes
+│       ├── authentication.md     Feature 1 implementation notes
+│       └── courses.md            Feature 2 implementation notes
 ├── infra/
 │   └── postgres/
 │       ├── init/01-schemas.sql               runs on first container init
@@ -43,29 +44,40 @@ med-lms/
 │   │   ├── models/               SQLAlchemy ORM
 │   │   │   ├── base.py           declarative base, naming convention
 │   │   │   ├── auth.py           read-only mapping of auth.user
-│   │   │   └── profile.py        user_profiles, auth_audit_log
+│   │   │   ├── profile.py        user_profiles, auth_audit_log
+│   │   │   └── course.py         courses, modules, lessons
 │   │   ├── schemas/              Pydantic — the API contract
 │   │   │   ├── common.py         envelope, pagination
-│   │   │   └── auth.py
+│   │   │   ├── auth.py
+│   │   │   └── course.py
 │   │   ├── repositories/         the only layer that knows SQLAlchemy
 │   │   │   ├── base.py
-│   │   │   └── user_repository.py
+│   │   │   ├── user_repository.py
+│   │   │   └── course_repository.py
 │   │   ├── services/             business logic + transaction boundaries
-│   │   │   └── auth_service.py
+│   │   │   ├── auth_service.py
+│   │   │   └── course_service.py
 │   │   ├── routers/              HTTP surface, one module per feature
 │   │   │   ├── auth.py
+│   │   │   ├── courses.py        student catalogue
+│   │   │   ├── admin_courses.py  authoring; role guard on the router
 │   │   │   └── health.py
 │   │   ├── middleware/
 │   │   │   ├── request_context.py  correlation id, access log
 │   │   │   └── error_handler.py    every error response is built here
 │   │   └── utils/
+│   │       ├── slug.py           URL slug generation + collision handling
+│   │       └── pagination.py     opaque keyset cursors
 │   └── tests/
 │       ├── conftest.py           real Postgres, real migrations, real ES256 keys
 │       ├── unit/
 │       │   ├── test_security.py  token forgery, expiry, rotation, alg confusion
-│       │   └── test_envelope.py  the response contract itself
+│       │   ├── test_envelope.py  the response contract itself
+│       │   └── test_slug_and_pagination.py
 │       └── integration/
-│           └── test_auth_router.py
+│           ├── test_auth_router.py
+│           ├── test_courses.py
+│           └── test_admin_courses.py
 │
 └── web/                          ── Next.js 15 app + identity authority ──
     ├── package.json
@@ -78,7 +90,9 @@ med-lms/
     │   ├── schemas.test.ts
     │   ├── api-client.test.ts
     │   ├── login-form.test.tsx
-    │   └── register-form.test.tsx
+    │   ├── register-form.test.tsx
+    │   ├── course-schemas.test.ts
+    │   └── course-catalogue.test.tsx
     └── src/
         ├── middleware.ts         redirect optimisation — NOT a security boundary
         ├── app/                  routes only; no business logic
@@ -89,17 +103,28 @@ med-lms/
         │   ├── (auth)/           unauthenticated: login, register,
         │   │                     forgot-password, reset-password, verify-email
         │   └── (app)/            authenticated shell — the real session gate
-        │       └── dashboard/
+        │       ├── dashboard/
+        │       ├── courses/      catalogue, course detail, lesson
+        │       └── admin/        admin shell (server-side role gate)
+        │           └── courses/  list, new, editor
         ├── components/
-        │   ├── ui/               shadcn-style primitives (button, input, …)
-        │   └── common/           composed, app-aware (text-field, app-header)
+        │   ├── ui/               shadcn-style primitives (button, input,
+        │   │                     badge, select, textarea, skeleton, …)
+        │   └── common/           composed, app-aware (text-field, select-field,
+        │                         textarea-field, password-field, app-header)
         ├── features/             vertical slices
-        │   └── auth/
-        │       ├── api/          domain-API calls
-        │       ├── components/   forms and views
-        │       ├── hooks/        TanStack Query hooks
-        │       ├── schemas/      zod — one source of truth for form rules
-        │       └── types/        mirrors backend/app/schemas/auth.py
+        │   ├── auth/
+        │   │   ├── api/          domain-API calls
+        │   │   ├── components/   forms and views
+        │   │   ├── hooks/        TanStack Query hooks
+        │   │   ├── schemas/      zod — one source of truth for form rules
+        │   │   └── types/        mirrors backend/app/schemas/auth.py
+        │   └── courses/
+        │       ├── api/          student + admin calls, kept separate
+        │       ├── components/   catalogue, outline, editor, forms
+        │       ├── hooks/        useCatalogue (infinite), admin mutations
+        │       ├── schemas/      zod + duration conversion
+        │       └── types/        mirrors backend/app/schemas/course.py
         ├── hooks/                cross-cutting hooks (see its README)
         ├── services/             cross-cutting client services (see its README)
         ├── lib/

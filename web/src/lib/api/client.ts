@@ -296,6 +296,12 @@ export const api = {
     options?: Omit<RequestOptions, "method" | "body">,
   ) => apiRequest<TData>(path, { ...options, method: "PATCH", body }),
 
+  put: <TData>(
+    path: string,
+    body?: unknown,
+    options?: Omit<RequestOptions, "method" | "body">,
+  ) => apiRequest<TData>(path, { ...options, method: "PUT", body }),
+
   delete: <TData>(path: string, options?: Omit<RequestOptions, "method" | "body">) =>
     apiRequest<TData>(path, { ...options, method: "DELETE" }),
 };

@@ -514,6 +514,7 @@ class CourseService:
             subtitle=course.subtitle,
             specialty=course.specialty,
             difficulty=course.difficulty,
+            status=course.status,
             cover_image_key=course.cover_image_key,
             lesson_count=lesson_count,
             total_duration_seconds=total_duration_seconds,
